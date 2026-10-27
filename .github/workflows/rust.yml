@@ -1,22 +1,51 @@
-name: Rust
+name: Build Mem Reduct (Windows)
 
 on:
   push:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
+  workflow_dispatch: # Cho phép bấm nút "Run workflow" thủ công trên web GitHub
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   build:
-
+    name: Build & Release
     runs-on: windows-latest
 
     steps:
-    - uses: actions/checkout@v4
-    - name: Build
-      run: cargo build --verbose
-    - name: Run tests
-      run: cargo test --verbose
+      # 1. Checkout mã nguồn bằng v5 (chạy trên Node.js 24, xóa bỏ hoàn toàn cảnh báo vàng)
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      # 2. Thiết lập Rust Toolchain ổn định (MSVC x86_64 chuẩn Windows)
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      # 3. Tự động Cache dependencies (giúp build các lần sau chỉ mất vài giây)
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      # 4. Kiểm tra cú pháp nhanh (Check)
+      - name: Cargo Check
+        run: cargo check --release
+
+      # 5. Build bản Release tối ưu hóa tối đa (sử dụng cấu hình profile.release trong Cargo.toml)
+      - name: Build Release Binary
+        run: cargo build --release --verbose
+
+      # 6. Chạy test nếu có (Tự động bỏ qua an toàn nếu chưa viết test, tránh crash CI)
+      - name: Run Tests
+        run: cargo test --release --verbose
+
+      # 7. Tự động nén và tải file memreduct.exe lên Artifacts để bạn tải về máy dùng ngay
+      - name: Upload executable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: memreduct-windows-x64
+          path: target/release/memreduct.exe
+          if-no-files-found: error
