@@ -44,7 +44,7 @@ jobs:
 
       # 7. Tự động nén và tải file memreduct.exe lên Artifacts để bạn tải về máy dùng ngay
       - name: Upload executable artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: memreduct-windows-x64
           path: target/release/memreduct.exe
