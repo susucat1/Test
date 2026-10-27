@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0" xmlns:asmv3="urn:schemas-microsoft-com:asm.v3">
+	<assemblyIdentity
+		version="3.5.3.0"
+		processorArchitecture="*"
+		name="MemReduct.Rust"
+		type="win32"
+	/>
+	<description>Mem Reduct - High Performance Memory Cleaner</description>
+
+	<!-- 1. Giao diện Modern Common-Controls v6 -->
+	<dependency>
+		<dependentAssembly>
+			<assemblyIdentity
+				type="win32"
+				name="Microsoft.Windows.Common-Controls"
+				version="6.0.0.0"
+				processorArchitecture="*"
+				language="*"
+				publicKeyToken="6595b64144ccf1df"
+			/>
+		</dependentAssembly>
+	</dependency>
+
+	<!-- 2. Bắt buộc quyền Administrator (Cực kỳ quan trọng để gọi NT Kernel APIs) -->
+	<trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+		<security>
+			<requestedPrivileges>
+				<requestedExecutionLevel level="requireAdministrator" uiAccess="false" />
+			</requestedPrivileges>
+		</security>
+	</trustInfo>
+
+	<!-- 3. Tương thích hệ điều hành: Tắt toàn bộ cơ chế shim/giả lập làm chậm app -->
+	<compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+		<application>
+			<!-- Windows 11 24H2 / Server 2025 -->
+			<maxversiontested Id="10.0.26100.0" />
+			<!-- Windows 10 & Windows 11 -->
+			<supportedOS Id="{8E0F7A12-BFB3-4FE8-B9A5-48FD50A15A9A}" />
+			<!-- Windows 8.1 -->
+			<supportedOS Id="{1F676C76-80E1-4239-95BB-83D0F6D0DA78}" />
+			<!-- Windows 8 -->
+			<supportedOS Id="{4A2F28E3-53B9-4441-BA9C-D69D4A4A6E38}" />
+			<!-- Windows 7 -->
+			<supportedOS Id="{35138B9A-5D96-4FBD-8E2D-A2440225F93A}" />
+		</application>
+	</compatibility>
+
+	<!-- 4. Tối ưu hóa sâu cho Windows & Rust Runtime -->
+	<application xmlns="urn:schemas-microsoft-com:asm.v3">
+		<windowsSettings>
+			<!-- DPI-Aware: Nét căng trên cả màn hình 2K/4K và tương thích ngược Win7/8.1 -->
+			<dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
+			<dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2, PerMonitor</dpiAwareness>
+			
+			<!-- Đường dẫn dài: Cho phép Rust xử lý file quá 260 ký tự -->
+			<longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
+			
+			<!-- Bật UTF-8 Native: Đồng bộ hoàn hảo với kiểu String / &str mặc định của Rust -->
+			<activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+			
+			<!-- Segment Heap: Cơ chế cấp phát RAM mới nhất của Win 10/11, tiết kiệm thêm RAM cho app -->
+			<heapType xmlns="http://schemas.microsoft.com/SMI/2020/WindowsSettings">SegmentHeap</heapType>
+			
+			<!-- Tắt Window Filtering để nhận sự kiện Taskbar / Hotkey ổn định nhất -->
+			<disableWindowFiltering xmlns="http://schemas.microsoft.com/SMI/2011/WindowsSettings">true</disableWindowFiltering>
+		</windowsSettings>
+	</application>
+</assembly>
