@@ -8,7 +8,6 @@ use windows_sys::Win32::Foundation::*;
 use windows_sys::Win32::Graphics::Gdi::*;
 use windows_sys::Win32::Security::*;
 use windows_sys::Win32::System::LibraryLoader::*;
-use windows_sys::Win32::System::Memory::*;
 use windows_sys::Win32::System::SystemInformation::*;
 use windows_sys::Win32::System::Threading::*;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
@@ -317,10 +316,22 @@ unsafe fn create_tray_icon(percent: u32) -> HICON {
     SetBkMode(mem_dc, TRANSPARENT as i32);
     SetTextColor(mem_dc, COLOR_TEXT);
 
+    // Ép kiểu as u32 cho 5 hằng số cấu hình font chữ theo đặc tả Win32 CreateFontW
     let font = CreateFontW(
-        -10, 0, 0, 0, FW_BOLD as i32, 0, 0, 0,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH, windows_sys::core::w!("Segoe UI"),
+        -10,
+        0,
+        0,
+        0,
+        FW_BOLD as i32,
+        0,
+        0,
+        0,
+        DEFAULT_CHARSET as u32,
+        OUT_DEFAULT_PRECIS as u32,
+        CLIP_DEFAULT_PRECIS as u32,
+        CLEARTYPE_QUALITY as u32,
+        DEFAULT_PITCH as u32,
+        windows_sys::core::w!("Segoe UI"),
     );
     let old_font = SelectObject(mem_dc, font);
 
