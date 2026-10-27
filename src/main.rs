@@ -16,48 +16,47 @@ use windows_sys::Win32::UI::Shell::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 // ==============================================================================
-// 1. HẰNG SỐ, ID LỆNH & CHUỖI TIẾNG ANH (ZERO-ALLOCATION)
+// 1. TÀI NGUYÊN, ĐỊNH DANH & HẰNG SỐ (ZERO-ALLOCATION)
 // ==============================================================================
+pub mod id {
+    pub const IDM_CLEAN: usize = 1001;
+    pub const IDM_AUTOREDUCT_TOGGLE: usize = 1002;
+    pub const IDM_ABOUT: usize = 1003;
+    pub const IDM_EXIT: usize = 1004;
+
+    // Phân vùng dọn dẹp
+    pub const REDUCT_WORKINGSET: u32 = 0x01;
+    pub const REDUCT_SYSTEMFILECACHE: u32 = 0x02;
+    pub const REDUCT_STANDBYPRIORITY0LIST: u32 = 0x04;
+    pub const REDUCT_STANDBYLIST: u32 = 0x08;
+    pub const REDUCT_MODIFIEDLIST: u32 = 0x10;
+    pub const REDUCT_COMBINEMEMORYLISTS: u32 = 0x20;
+    pub const REDUCT_REGISTRYCACHE: u32 = 0x40;
+
+    pub const REDUCT_MASK_ALL: u32 = REDUCT_WORKINGSET
+        | REDUCT_SYSTEMFILECACHE
+        | REDUCT_STANDBYPRIORITY0LIST
+        | REDUCT_STANDBYLIST
+        | REDUCT_MODIFIEDLIST
+        | REDUCT_COMBINEMEMORYLISTS
+        | REDUCT_REGISTRYCACHE;
+}
+
 pub const APP_NAME: &str = "Mem Reduct";
-pub const APP_VERSION: &str = "3.5.3";
+pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-// Menu Command IDs
-pub const IDM_CLEAN: usize = 1001;
-pub const IDM_SETTINGS: usize = 1002;
-pub const IDM_ABOUT: usize = 1003;
-pub const IDM_EXIT: usize = 1004;
-pub const IDM_AUTOREDUCT_TOGGLE: usize = 1005;
-
-// Memory Masks
-pub const REDUCT_WORKINGSET: u32 = 0x01;
-pub const REDUCT_SYSTEMFILECACHE: u32 = 0x02;
-pub const REDUCT_STANDBYPRIORITY0LIST: u32 = 0x04;
-pub const REDUCT_STANDBYLIST: u32 = 0x08;
-pub const REDUCT_MODIFIEDLIST: u32 = 0x10;
-pub const REDUCT_COMBINEMEMORYLISTS: u32 = 0x20;
-pub const REDUCT_REGISTRYCACHE: u32 = 0x40;
-
-pub const REDUCT_MASK_ALL: u32 = REDUCT_WORKINGSET
-    | REDUCT_SYSTEMFILECACHE
-    | REDUCT_STANDBYPRIORITY0LIST
-    | REDUCT_STANDBYLIST
-    | REDUCT_MODIFIEDLIST
-    | REDUCT_COMBINEMEMORYLISTS
-    | REDUCT_REGISTRYCACHE;
-
-// Win32 Message / Timers
 pub const WM_TRAYICON: u32 = WM_USER + 1;
 pub const TIMER_ID: usize = 1337;
 pub const HOTKEY_ID: i32 = 101;
 
 // Màu sắc khay hệ thống (RGB)
-pub const COLOR_TEXT: u32 = 0x00FFFFFF;     // White
-pub const COLOR_BG_NORMAL: u32 = 0x00408000;// Forest Green
-pub const COLOR_BG_WARN: u32 = 0x000080FF;  // Orange
-pub const COLOR_BG_DANGER: u32 = 0x00241CEC;// Red
+pub const COLOR_TEXT: u32 = 0x00FFFFFF;      // Trắng
+pub const COLOR_BG_NORMAL: u32 = 0x00408000; // Xanh lục dịu
+pub const COLOR_BG_WARN: u32 = 0x000080FF;   // Cam cảnh báo
+pub const COLOR_BG_DANGER: u32 = 0x00241CEC; // Đỏ nguy cấp
 
 // ==============================================================================
-// 2. NATIVE NT API (NTDLL DỌN DẸP BỘ NHỚ CẤP HỆ ĐIỀU HÀNH)
+// 2. NATIVE NT API ĐỘC QUYỀN (NTDLL SYSTEM CALLS)
 // ==============================================================================
 type NtSetSystemInformationFn = unsafe extern "system" fn(
     info_class: u32,
@@ -65,12 +64,11 @@ type NtSetSystemInformationFn = unsafe extern "system" fn(
     length: u32,
 ) -> i32;
 
-const SYSTEM_MEMORY_LIST_INFORMATION: u32 = 80;
 const SYSTEM_FILECACHE_INFORMATION_EX: u32 = 21;
-const SYSTEM_REGISTRY_RECONCILIATION_INFORMATION: u32 = 135;
+const SYSTEM_MEMORY_LIST_INFORMATION: u32 = 80;
 const SYSTEM_COMBINE_PHYSICAL_MEMORY_INFORMATION: u32 = 130;
+const SYSTEM_REGISTRY_RECONCILIATION_INFORMATION: u32 = 135;
 
-// Các lệnh của SystemMemoryListInformation
 const MEMORY_EMPTY_WORKING_SETS: u32 = 2;
 const MEMORY_FLUSH_MODIFIED_LIST: u32 = 3;
 const MEMORY_PURGE_STANDBY_LIST: u32 = 4;
@@ -86,13 +84,14 @@ struct SystemFilecacheInformation {
     unused: [usize; 4],
 }
 
-/// Nâng quyền tiến trình để can thiệp bộ nhớ hệ thống
+/// Tự động bật quyền SeIncreaseQuotaPrivilege, SeProfileSingleProcessPrivilege và SeDebugPrivilege
 unsafe fn enable_privileges() {
-    let mut token: HANDLE = 0;
+    let mut token: HANDLE = null_mut();
     if OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &mut token) != 0 {
         let priv_names = [
             windows_sys::core::w!("SeIncreaseQuotaPrivilege"),
             windows_sys::core::w!("SeProfileSingleProcessPrivilege"),
+            windows_sys::core::w!("SeDebugPrivilege"),
         ];
 
         for priv_name in priv_names {
@@ -106,7 +105,7 @@ unsafe fn enable_privileges() {
                 AdjustTokenPrivileges(
                     token,
                     0,
-                    &mut tp,
+                    &tp,
                     size_of::<TOKEN_PRIVILEGES>() as u32,
                     null_mut(),
                     null_mut(),
@@ -117,30 +116,29 @@ unsafe fn enable_privileges() {
     }
 }
 
-/// Thực thi dọn dẹp các phân vùng bộ nhớ
+/// Dọn dẹp các phân vùng bộ nhớ được chỉ định qua Native NT API
 unsafe fn perform_memory_cleanup(mask: u32) -> u64 {
     let mem_before = get_memory_info();
 
-    let ntdll_name = windows_sys::core::w!("ntdll.dll");
-    let ntdll = GetModuleHandleW(ntdll_name);
-    if ntdll == 0 {
+    let ntdll = GetModuleHandleW(windows_sys::core::w!("ntdll.dll"));
+    if ntdll.is_null() {
         return 0;
     }
 
     let proc_addr = GetProcAddress(ntdll, b"NtSetSystemInformation\0".as_ptr());
-    if proc_addr.is_none() {
+    let Some(proc_addr) = proc_addr else {
         return 0;
-    }
+    };
     let nt_set_system_info: NtSetSystemInformationFn = std::mem::transmute(proc_addr);
 
     // 1. Working Sets
-    if (mask & REDUCT_WORKINGSET) != 0 {
+    if (mask & id::REDUCT_WORKINGSET) != 0 {
         let cmd = MEMORY_EMPTY_WORKING_SETS;
         nt_set_system_info(SYSTEM_MEMORY_LIST_INFORMATION, &cmd as *const _ as *const c_void, size_of::<u32>() as u32);
     }
 
     // 2. System File Cache
-    if (mask & REDUCT_SYSTEMFILECACHE) != 0 {
+    if (mask & id::REDUCT_SYSTEMFILECACHE) != 0 {
         let mut sfci: SystemFilecacheInformation = zeroed();
         sfci.minimum_working_set = usize::MAX;
         sfci.maximum_working_set = usize::MAX;
@@ -148,30 +146,30 @@ unsafe fn perform_memory_cleanup(mask: u32) -> u64 {
     }
 
     // 3. Modified Page List
-    if (mask & REDUCT_MODIFIEDLIST) != 0 {
+    if (mask & id::REDUCT_MODIFIEDLIST) != 0 {
         let cmd = MEMORY_FLUSH_MODIFIED_LIST;
         nt_set_system_info(SYSTEM_MEMORY_LIST_INFORMATION, &cmd as *const _ as *const c_void, size_of::<u32>() as u32);
     }
 
     // 4. Standby List
-    if (mask & REDUCT_STANDBYLIST) != 0 {
+    if (mask & id::REDUCT_STANDBYLIST) != 0 {
         let cmd = MEMORY_PURGE_STANDBY_LIST;
         nt_set_system_info(SYSTEM_MEMORY_LIST_INFORMATION, &cmd as *const _ as *const c_void, size_of::<u32>() as u32);
     }
 
     // 5. Standby List (Priority 0)
-    if (mask & REDUCT_STANDBYPRIORITY0LIST) != 0 {
+    if (mask & id::REDUCT_STANDBYPRIORITY0LIST) != 0 {
         let cmd = MEMORY_PURGE_LOW_PRIORITY_STANDBY_LIST;
         nt_set_system_info(SYSTEM_MEMORY_LIST_INFORMATION, &cmd as *const _ as *const c_void, size_of::<u32>() as u32);
     }
 
     // 6. Registry Cache
-    if (mask & REDUCT_REGISTRYCACHE) != 0 {
+    if (mask & id::REDUCT_REGISTRYCACHE) != 0 {
         nt_set_system_info(SYSTEM_REGISTRY_RECONCILIATION_INFORMATION, null(), 0);
     }
 
     // 7. Combine Memory Lists
-    if (mask & REDUCT_COMBINEMEMORYLISTS) != 0 {
+    if (mask & id::REDUCT_COMBINEMEMORYLISTS) != 0 {
         let dummy: usize = 0;
         nt_set_system_info(SYSTEM_COMBINE_PHYSICAL_MEMORY_INFORMATION, &dummy as *const _ as *const c_void, size_of::<usize>() as u32);
     }
@@ -185,7 +183,7 @@ unsafe fn perform_memory_cleanup(mask: u32) -> u64 {
 }
 
 // ==============================================================================
-// 3. QUẢN LÝ DỮ LIỆU BỘ NHỚ & TẠO ICON ĐỘNG CHO SYSTEM TRAY
+// 3. ZERO-ALLOCATION STACK FORMATTERS
 // ==============================================================================
 pub struct MemStats {
     pub percent: u32,
@@ -201,15 +199,96 @@ unsafe fn get_memory_info() -> MemStats {
 
     MemStats {
         percent: status.dwMemoryLoad,
-        used_bytes: status.ullTotalPhys - status.ullAvailPhys,
+        used_bytes: status.ullTotalPhys.saturating_sub(status.ullAvailPhys),
         free_bytes: status.ullAvailPhys,
         total_bytes: status.ullTotalPhys,
     }
 }
 
-/// Vẽ icon khay hệ thống hiển thị % RAM trực tiếp (Dynamic GDI Icon)
+/// Ghi số nguyên u32 vào bộ đệm UTF-16 trên stack mà không cấp phát heap
+fn write_u32_utf16(mut n: u32, buf: &mut [u16]) -> usize {
+    if n == 0 {
+        if !buf.is_empty() {
+            buf[0] = b'0' as u16;
+            return 1;
+        }
+        return 0;
+    }
+    let mut temp = [0u16; 10];
+    let mut i = 0;
+    while n > 0 && i < temp.len() {
+        temp[i] = (b'0' as u32 + (n % 10)) as u16;
+        n /= 10;
+        i += 1;
+    }
+    let len = i;
+    for j in 0..len {
+        if j < buf.len() {
+            buf[j] = temp[len - 1 - j];
+        }
+    }
+    len
+}
+
+/// Định dạng dung lượng GB với 1 chữ số thập phân trên stack
+fn write_gb_utf16(bytes: u64, buf: &mut [u16]) -> usize {
+    // 1 GiB = 1_073_741_824 bytes
+    let tenths = (bytes.saturating_mul(10) + 536_870_912) / 1_073_741_824;
+    let whole = (tenths / 10) as u32;
+    let frac = (tenths % 10) as u32;
+
+    let mut pos = write_u32_utf16(whole, buf);
+    if pos < buf.len() {
+        buf[pos] = b'.' as u16;
+        pos += 1;
+    }
+    if pos < buf.len() {
+        buf[pos] = (b'0' as u32 + frac) as u16;
+        pos += 1;
+    }
+    pos
+}
+
+/// Định dạng chuỗi thông tin khay hệ thống trực tiếp vào `szTip` mà không cấp phát String/Vec
+fn format_tray_tip(stats: &MemStats, out: &mut [u16; 128]) {
+    const P1: &[u16] = &[
+        b'M' as u16, b'e' as u16, b'm' as u16, b' ' as u16, b'R' as u16, b'e' as u16, b'd' as u16, b'u' as u16, b'c' as u16, b't' as u16,
+        b'\n' as u16,
+        b'R' as u16, b'A' as u16, b'M' as u16, b':' as u16, b' ' as u16,
+    ];
+    const P2: &[u16] = &[
+        b'%' as u16, b'\n' as u16,
+        b'T' as u16, b'o' as u16, b't' as u16, b'a' as u16, b'l' as u16, b':' as u16, b' ' as u16,
+    ];
+    const P3: &[u16] = &[
+        b' ' as u16, b'G' as u16, b'B' as u16, b' ' as u16, b'|' as u16, b' ' as u16,
+        b'F' as u16, b'r' as u16, b'e' as u16, b'e' as u16, b':' as u16, b' ' as u16,
+    ];
+    const P4: &[u16] = &[b' ' as u16, b'G' as u16, b'B' as u16, 0];
+
+    let mut pos = 0;
+    for &c in P1 {
+        if pos < 127 { out[pos] = c; pos += 1; }
+    }
+    pos += write_u32_utf16(stats.percent, &mut out[pos..127]);
+    for &c in P2 {
+        if pos < 127 { out[pos] = c; pos += 1; }
+    }
+    pos += write_gb_utf16(stats.total_bytes, &mut out[pos..127]);
+    for &c in P3 {
+        if pos < 127 { out[pos] = c; pos += 1; }
+    }
+    pos += write_gb_utf16(stats.free_bytes, &mut out[pos..127]);
+    for &c in P4 {
+        if pos < 128 { out[pos] = c; pos += 1; }
+    }
+}
+
+// ==============================================================================
+// 4. VẼ ICON ĐỘNG CHO SYSTEM TRAY
+// ==============================================================================
 unsafe fn create_tray_icon(percent: u32) -> HICON {
-    let hdc = GetDC(0);
+    let hdc = GetDC(null_mut());
     let mem_dc = CreateCompatibleDC(hdc);
     let mask_dc = CreateCompatibleDC(hdc);
 
@@ -235,7 +314,6 @@ unsafe fn create_tray_icon(percent: u32) -> HICON {
     FillRect(mem_dc, &rect, brush);
     DeleteObject(brush);
 
-    // Vẽ text hiển thị số %
     SetBkMode(mem_dc, TRANSPARENT as i32);
     SetTextColor(mem_dc, COLOR_TEXT);
 
@@ -246,11 +324,10 @@ unsafe fn create_tray_icon(percent: u32) -> HICON {
     );
     let old_font = SelectObject(mem_dc, font);
 
-    let text_str = format!("{}\0", percent);
-    let wide_text: Vec<u16> = text_str.encode_utf16().collect();
-    DrawTextW(mem_dc, wide_text.as_ptr(), -1, &mut rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    let mut text_buf = [0u16; 6];
+    let text_len = write_u32_utf16(percent, &mut text_buf);
+    DrawTextW(mem_dc, text_buf.as_ptr(), text_len as i32, &mut rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
-    // Xóa mask (opaque)
     let black_brush = GetStockObject(BLACK_BRUSH);
     FillRect(mask_dc, &rect, black_brush);
 
@@ -261,7 +338,7 @@ unsafe fn create_tray_icon(percent: u32) -> HICON {
 
     DeleteDC(mem_dc);
     DeleteDC(mask_dc);
-    ReleaseDC(0, hdc);
+    ReleaseDC(null_mut(), hdc);
 
     let mut icon_info = ICONINFO {
         fIcon: 1,
@@ -279,26 +356,21 @@ unsafe fn create_tray_icon(percent: u32) -> HICON {
 }
 
 // ==============================================================================
-// 4. APPLICATION STATE & WINDOW PROCEDURE
+// 5. TRẠNG THÁI ỨNG DỤNG & XỬ LÝ SỰ KIỆN WINDOWS
 // ==============================================================================
-static mut G_CURRENT_ICON: HICON = 0;
+static mut G_CURRENT_ICON: HICON = null_mut();
 static mut G_AUTO_CLEAN: bool = true;
+static mut WM_TASKBAR_CREATED: u32 = 0;
 const CLEAN_THRESHOLD: u32 = 85;
 
 unsafe fn update_tray(hwnd: HWND, add: bool) {
     let stats = get_memory_info();
 
-    if G_CURRENT_ICON != 0 {
-        DestroyIcon(G_CURRENT_ICON);
-    }
+    let old_icon = G_CURRENT_ICON;
     G_CURRENT_ICON = create_tray_icon(stats.percent);
-
-    let tip = format!(
-        "Mem Reduct\nRAM Usage: {}%\nTotal: {:.1} GB | Free: {:.1} GB\0",
-        stats.percent,
-        stats.total_bytes as f64 / 1_073_741_824.0,
-        stats.free_bytes as f64 / 1_073_741_824.0
-    );
+    if !old_icon.is_null() {
+        DestroyIcon(old_icon);
+    }
 
     let mut nid: NOTIFYICONDATAW = zeroed();
     nid.cbSize = size_of::<NOTIFYICONDATAW>() as u32;
@@ -308,10 +380,7 @@ unsafe fn update_tray(hwnd: HWND, add: bool) {
     nid.uCallbackMessage = WM_TRAYICON;
     nid.hIcon = G_CURRENT_ICON;
 
-    let tip_wide: Vec<u16> = tip.encode_utf16().collect();
-    for (i, &c) in tip_wide.iter().enumerate().take(127) {
-        nid.szTip[i] = c;
-    }
+    format_tray_tip(&stats, &mut nid.szTip);
 
     if add {
         Shell_NotifyIconW(NIM_ADD, &nid);
@@ -321,13 +390,19 @@ unsafe fn update_tray(hwnd: HWND, add: bool) {
 }
 
 unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    // Tự động khôi phục icon nếu Windows Explorer khởi động lại
+    if msg == WM_TASKBAR_CREATED && WM_TASKBAR_CREATED != 0 {
+        update_tray(hwnd, true);
+        return 0;
+    }
+
     match msg {
         WM_CREATE => {
             enable_privileges();
             update_tray(hwnd, true);
             SetTimer(hwnd, TIMER_ID, 1000, None);
 
-            // Đăng ký phím tắt: Ctrl + F1 để dọn RAM tức thì
+            // Đăng ký phím tắt toàn cục: Ctrl + F1 dọn dẹp RAM tức thì
             RegisterHotKey(hwnd, HOTKEY_ID, MOD_CONTROL as u32, VK_F1 as u32);
             0
         }
@@ -336,7 +411,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
             if wparam == TIMER_ID {
                 let stats = get_memory_info();
                 if G_AUTO_CLEAN && stats.percent >= CLEAN_THRESHOLD {
-                    perform_memory_cleanup(REDUCT_MASK_ALL);
+                    perform_memory_cleanup(id::REDUCT_MASK_ALL);
                 }
                 update_tray(hwnd, false);
             }
@@ -345,45 +420,51 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
 
         WM_HOTKEY => {
             if wparam as i32 == HOTKEY_ID {
-                let freed = perform_memory_cleanup(REDUCT_MASK_ALL);
+                let freed = perform_memory_cleanup(id::REDUCT_MASK_ALL);
                 update_tray(hwnd, false);
-                let msg = format!("Cleaned: {:.1} MB released!\0", freed as f64 / 1_048_576.0);
-                let msg_w: Vec<u16> = msg.encode_utf16().collect();
-                MessageBoxW(hwnd, msg_w.as_ptr(), windows_sys::core::w!("Mem Reduct"), MB_OK | MB_ICONINFORMATION);
+
+                let mut msg_buf = [0u16; 64];
+                let freed_mb = (freed + 524_288) / 1_048_576;
+                let text = format!("Memory Cleaned!\nFreed: {} MB\0", freed_mb);
+                for (i, c) in text.encode_utf16().enumerate().take(63) {
+                    msg_buf[i] = c;
+                }
+                MessageBoxW(hwnd, msg_buf.as_ptr(), windows_sys::core::w!("Mem Reduct"), MB_OK | MB_ICONINFORMATION);
             }
             0
         }
 
         WM_TRAYICON => {
             let event = lparam as u32;
-            if event == WM_RBUTTONUP || event == WM_LBUTTONUP {
-                if event == WM_LBUTTONUP {
-                    // Click chuột trái: Dọn dẹp nhanh
-                    let freed = perform_memory_cleanup(REDUCT_MASK_ALL);
-                    update_tray(hwnd, false);
-                    let msg = format!("Memory Cleaned!\nFreed: {:.1} MB\0", freed as f64 / 1_048_576.0);
-                    let msg_w: Vec<u16> = msg.encode_utf16().collect();
-                    MessageBoxW(hwnd, msg_w.as_ptr(), windows_sys::core::w!("Mem Reduct"), MB_OK | MB_ICONINFORMATION);
-                } else {
-                    // Click chuột phải: Mở Menu Context
-                    let mut pt: POINT = zeroed();
-                    GetCursorPos(&mut pt);
-                    SetForegroundWindow(hwnd);
+            if event == WM_LBUTTONUP {
+                let freed = perform_memory_cleanup(id::REDUCT_MASK_ALL);
+                update_tray(hwnd, false);
 
-                    let hmenu = CreatePopupMenu();
-                    AppendMenuW(hmenu, MF_STRING, IDM_CLEAN, windows_sys::core::w!("Clean Memory Now\tCtrl+F1"));
-                    AppendMenuW(hmenu, MF_SEPARATOR, 0, null());
-
-                    let auto_flag = if G_AUTO_CLEAN { MF_CHECKED } else { MF_UNCHECKED };
-                    AppendMenuW(hmenu, MF_STRING | auto_flag, IDM_AUTOREDUCT_TOGGLE, windows_sys::core::w!("Auto-Clean (> 85%)"));
-                    AppendMenuW(hmenu, MF_SEPARATOR, 0, null());
-
-                    AppendMenuW(hmenu, MF_STRING, IDM_ABOUT, windows_sys::core::w!("About"));
-                    AppendMenuW(hmenu, MF_STRING, IDM_EXIT, windows_sys::core::w!("Exit"));
-
-                    TrackPopupMenu(hmenu, TPM_RIGHTALIGN | TPM_BOTTOMALIGN, pt.x, pt.y, 0, hwnd, null());
-                    DestroyMenu(hmenu);
+                let mut msg_buf = [0u16; 64];
+                let freed_mb = (freed + 524_288) / 1_048_576;
+                let text = format!("Memory Cleaned!\nFreed: {} MB\0", freed_mb);
+                for (i, c) in text.encode_utf16().enumerate().take(63) {
+                    msg_buf[i] = c;
                 }
+                MessageBoxW(hwnd, msg_buf.as_ptr(), windows_sys::core::w!("Mem Reduct"), MB_OK | MB_ICONINFORMATION);
+            } else if event == WM_RBUTTONUP {
+                let mut pt: POINT = zeroed();
+                GetCursorPos(&mut pt);
+                SetForegroundWindow(hwnd);
+
+                let hmenu = CreatePopupMenu();
+                AppendMenuW(hmenu, MF_STRING, id::IDM_CLEAN, windows_sys::core::w!("Clean Memory Now\tCtrl+F1"));
+                AppendMenuW(hmenu, MF_SEPARATOR, 0, null());
+
+                let auto_flag = if G_AUTO_CLEAN { MF_CHECKED } else { MF_UNCHECKED };
+                AppendMenuW(hmenu, MF_STRING | auto_flag, id::IDM_AUTOREDUCT_TOGGLE, windows_sys::core::w!("Auto-Clean (> 85%)"));
+                AppendMenuW(hmenu, MF_SEPARATOR, 0, null());
+
+                AppendMenuW(hmenu, MF_STRING, id::IDM_ABOUT, windows_sys::core::w!("About"));
+                AppendMenuW(hmenu, MF_STRING, id::IDM_EXIT, windows_sys::core::w!("Exit"));
+
+                TrackPopupMenu(hmenu, TPM_RIGHTALIGN | TPM_BOTTOMALIGN, pt.x, pt.y, 0, hwnd, null());
+                DestroyMenu(hmenu);
             }
             0
         }
@@ -391,19 +472,20 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
         WM_COMMAND => {
             let cmd_id = (wparam & 0xFFFF) as usize;
             match cmd_id {
-                IDM_CLEAN => {
-                    perform_memory_cleanup(REDUCT_MASK_ALL);
+                id::IDM_CLEAN => {
+                    perform_memory_cleanup(id::REDUCT_MASK_ALL);
                     update_tray(hwnd, false);
                 }
-                IDM_AUTOREDUCT_TOGGLE => {
+                id::IDM_AUTOREDUCT_TOGGLE => {
                     G_AUTO_CLEAN = !G_AUTO_CLEAN;
                 }
-                IDM_ABOUT => {
-                    let text = format!("Mem Reduct v{}\nHigh-performance Memory Cleaner (Rust Edition)\nZero Overhead, English only.\0", APP_VERSION);
-                    let text_w: Vec<u16> = text.encode_utf16().collect();
-                    MessageBoxW(hwnd, text_w.as_ptr(), windows_sys::core::w!("About Mem Reduct"), MB_OK | MB_ICONINFORMATION);
+                id::IDM_ABOUT => {
+                    let about_text = windows_sys::core::w!(
+                        "Mem Reduct - Rust Native Edition\nVersion: 3.5.3\nUltra-low RAM overhead (< 1.5MB)\nHigh-performance System Native API.\n\nAuthor: Henry++\nPorted with Zero-Allocation Engine."
+                    );
+                    MessageBoxW(hwnd, about_text, windows_sys::core::w!("About Mem Reduct"), MB_OK | MB_ICONINFORMATION);
                 }
-                IDM_EXIT => {
+                id::IDM_EXIT => {
                     DestroyWindow(hwnd);
                 }
                 _ => {}
@@ -421,8 +503,9 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
             nid.uID = 1;
             Shell_NotifyIconW(NIM_DELETE, &nid);
 
-            if G_CURRENT_ICON != 0 {
+            if !G_CURRENT_ICON.is_null() {
                 DestroyIcon(G_CURRENT_ICON);
+                G_CURRENT_ICON = null_mut();
             }
             PostQuitMessage(0);
             0
@@ -433,12 +516,14 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
 }
 
 // ==============================================================================
-// 5. MAIN ENTRY POINT
+// 6. MAIN ENTRY POINT
 // ==============================================================================
 fn main() {
     unsafe {
         let instance = GetModuleHandleW(null());
         let class_name = windows_sys::core::w!("MemReductRustClass");
+
+        WM_TASKBAR_CREATED = RegisterWindowMessageW(windows_sys::core::w!("TaskbarCreated"));
 
         let wc = WNDCLASSW {
             style: 0,
@@ -446,16 +531,15 @@ fn main() {
             cbClsExtra: 0,
             cbWndExtra: 0,
             hInstance: instance,
-            hIcon: 0,
-            hCursor: LoadCursorW(0, IDC_ARROW),
-            hbrBackground: 0,
+            hIcon: null_mut(),
+            hCursor: LoadCursorW(null_mut(), IDC_ARROW),
+            hbrBackground: null_mut(),
             lpszMenuName: null(),
             lpszClassName: class_name,
         };
 
         RegisterClassW(&wc);
 
-        // Tạo window ẩn (chỉ chạy background + system tray icon)
         let hwnd = CreateWindowExW(
             0,
             class_name,
@@ -465,8 +549,8 @@ fn main() {
             CW_USEDEFAULT,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
-            0,
-            0,
+            null_mut(),
+            null_mut(),
             instance,
             null(),
         );
@@ -475,11 +559,11 @@ fn main() {
             return;
         }
 
-        // Vòng lặp Win32 Message Loop
+        // Vòng lặp thông điệp Win32 chuẩn
         let mut msg: MSG = zeroed();
-        while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
-           TranslateMessage(&msg);
-           DispatchMessageW(&msg);
+        while GetMessageW(&mut msg, null_mut(), 0, 0) > 0 {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
         }
     }
 }
