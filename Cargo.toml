@@ -1,0 +1,35 @@
+[package]
+name = "memreduct"
+version = "3.5.3"
+edition = "2024"
+authors = ["Henry++", "YourName"]
+description = "High-performance memory cleaner written in Rust"
+license = "GPL-3.0"
+readme = "README.md"
+keywords = ["memory", "cleaner", "windows", "win32", "memreduct"]
+
+[dependencies]
+windows-sys = { version = "0.59", default-features = false, features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Graphics_Gdi",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+    "Win32_System_Memory",
+    "Win32_System_LibraryLoader",
+    "Win32_Security",
+    "Win32_UI_Shell",
+    "Win32_UI_Input_KeyboardAndMouse"
+] }
+
+[build-dependencies]
+winres = "0.1"
+
+# Cấu hình tối ưu phát hành (Production / Release Profile)
+[profile.release]
+opt-level = "s"         # Tối ưu kích thước thông minh mà không làm giảm tốc độ thực thi
+lto = "fat"             # Link-Time Optimization mức cao nhất (loại bỏ triệt để code thừa)
+codegen-units = 1       # Gộp toàn bộ vào 1 đơn vị dịch để compiler tối ưu tối đa
+panic = "abort"         # Bỏ stack unwinding (giảm kích thước binary và giải phóng RAM tức thì)
+strip = true            # Xóa sạch toàn bộ debug symbol table
+overflow-checks = false # Tắt kiểm tra tràn số lúc runtime (tăng tốc độ xử lý vòng lặp)
