@@ -471,15 +471,15 @@ fn main() {
             null(),
         );
 
-        if hwnd == 0 {
+        if hwnd.is_null() {
             return;
         }
 
         // Vòng lặp Win32 Message Loop
         let mut msg: MSG = zeroed();
-        while GetMessageW(&mut msg, 0, 0, 0) > 0 {
-            TranslateMessage(&msg);
-            DispatchMessageW(&msg);
+        while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
+           TranslateMessage(&msg);
+           DispatchMessageW(&msg);
         }
     }
 }
